@@ -21,4 +21,5 @@ $ cp herpaderp.x64.o ~/.sliver-client/extensions/herpaderping
 ```
 
 Start sliver client and try extension.
-![immagine](https://user-images.githubusercontent.com/74059030/199053135-f27c441d-5053-462e-8095-c47fb0d0a40c.png)
+![immagine](https://user-images.githubusercontent.com/74059030/199059760-f0353823-972d-4ae2-95e4-9365763adf46.png)
+![immagine](https://user-images.githubusercontent.com/74059030/199059898-992f9604-5027-4e66-855c-37b95cfafb2a.png)
