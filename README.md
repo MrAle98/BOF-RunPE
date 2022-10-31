@@ -1,5 +1,5 @@
 # BOF PROCESS HERPADERPING
-Beacon Object File partial implementation of process herpaderping project available here: https://github.com/jxy-s/herpaderping
+Beacon Object File partial implementation of process herpaderping technique. Original project available here: https://github.com/jxy-s/herpaderping
 ### Compilation
 Executed on debian:
 ```
