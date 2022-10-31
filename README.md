@@ -18,5 +18,5 @@ $ mkdir ~/.sliver-client/extensions/herpaderping
 $ cp extension.json ~/.sliver-client/extensions/herpaderping
 $ cp herpaderp.x64.o ~/.sliver-client/extensions/herpaderping
 ```
-Start sliver client
+Start sliver client and try extension.
 ![immagine](https://user-images.githubusercontent.com/74059030/199053135-f27c441d-5053-462e-8095-c47fb0d0a40c.png)
