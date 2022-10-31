@@ -2,12 +2,6 @@
 /* some code and/or ideas are from trustedsec SA Github repo -- thankyou trustedsec! */
 #include <windows.h>
 
-#ifdef BOF
-
-#ifdef __cplusplus
-extern "C" {
-#endif
-
 #include "beacon.h"
 
 void go(char* buff, int len);
@@ -146,10 +140,6 @@ DECLSPEC_IMPORT BOOL WINAPI KERNEL32$IsProcessorFeaturePresent(DWORD ProcessorFe
 DECLSPEC_IMPORT BOOL WINAPI ADVAPI32$GetUserNameW(LPWSTR lpBuffer, LPDWORD pcbBuffer);
 
 
-#ifdef __cplusplus
-}
-#endif
-
 
 /* helper macros */
 
@@ -268,6 +258,3 @@ DECLSPEC_IMPORT BOOL WINAPI ADVAPI32$GetUserNameW(LPWSTR lpBuffer, LPDWORD pcbBu
 #define GetUserNameW			ADVAPI32$GetUserNameW
 #define IsProcessorFeaturePresent	KERNEL32$IsProcessorFeaturePresent
 
-#else
-
-#endif

