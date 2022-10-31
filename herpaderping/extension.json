@@ -1,0 +1,26 @@
+{
+  "name": "herpaderp",
+  "version": "v0.0.1",
+  "command_name": "herpaderp",
+  "extension_author": "c2biz",
+  "original_author": "ajpc500",
+  "repo_url": "https://github.com/sliverarmory/BOFs",
+  "help": "process herpaderping",
+  "depends_on": "coff-loader",
+  "entrypoint": "go",
+  "files": [
+    {
+      "os": "windows",
+      "arch": "amd64",
+      "path": "herpaderp.x64.o"
+    }
+  ],
+  "arguments": [
+    {
+      "name": "bin",
+      "desc": "/local/path/to/pe.exe",
+      "type": "file",
+      "optional": false
+    }
+  ]
+}
