@@ -3,7 +3,13 @@
 ### Compilation
 
 Executed on debian:
-```x86_64-w64-mingw32-gcc -c HerpaDerp.c -o herpaderp.x64.o```
+```
+$ cd herpaderping
+$ x86_64-w64-mingw32-gcc -c HerpaDerp.c -o herpaderp.x64.o
+$ mkdir ~/.sliver-client/extensions/herpaderping
+$ cp extension.json ~/.sliver-client/extensions/herpaderping
+$ cp herpaderp.x64.o ~/.sliver-client/extensions/herpaderping
+```
 
 
 ### Execution
