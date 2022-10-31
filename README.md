@@ -13,7 +13,7 @@ Tested in sliver.
 
 Load extension in sliver client:
 ```
-$ mkdir ~/.sliver-client/extensions/herpaderping
+$ mkdir ~/.sliver-client/extensions/herpaderp
 $ cp extension.json ~/.sliver-client/extensions/herpaderping
 $ cp herpaderp.x64.o ~/.sliver-client/extensions/herpaderping
 ```
