@@ -1,6 +1,6 @@
 # BOF PROCESS HERPADERPING
 Beacon Object File partial implementation of process herpaderping technique. All credits goes to `jxy-s` for his original project available here: https://github.com/jxy-s/herpaderping .
-The BOF takes as input a PE and perform process herpaderping in order to execute it. It creates a file `C:\Users\Administrator\Desktop\myfile2.exe`. It uses pattern `{'\x82', '\x7f', '\x76', '\x7c'}` for overwriting the file content.
+The BOF takes as input a .exe filename on the remote machine and and a PE on the local machine and perform process herpaderping in order to execute the PE. It creates the file specified as first parameter. It uses pattern `{'\x82', '\x7f', '\x76', '\x7c'}` for overwriting the file content.
 
 ### Compilation
 Executed on debian:
