@@ -17,6 +17,12 @@
   ],
   "arguments": [
     {
+      "name": "filename",
+      "desc": "/path/to/filename",
+      "type": "string",
+      "optional": false
+    },
+    {
       "name": "bin",
       "desc": "/local/path/to/pe.exe",
       "type": "file",
