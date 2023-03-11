@@ -35,6 +35,12 @@
       "optional": false
     },
     {
+      "name": "ppid",
+      "desc": "ppid spoofing. ppid=0 for no spoofing",
+      "type": "integer",
+      "optional": false
+    },
+    {
       "name": "args",
       "desc": "arguments",
       "type": "wstring",
